@@ -1,0 +1,21 @@
+# evm-db configuration
+
+[redis]
+redis_host = "127.0.0.1"
+redis_port = 6379
+# redis_password = "secret"
+redis_db = 0
+
+[rpc]
+rpc_host = "0.0.0.0"
+rpc_port = 8545
+
+[chain]
+chain_id = 100100
+block_gas_limit = 30000000
+block_time_ms = 10
+base_fee_initial = 1000000
+
+[sequencer]
+# sequencer_key = "/path/to/sequencer.key"
+log_level = 2
