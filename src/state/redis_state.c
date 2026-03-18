@@ -51,6 +51,8 @@ int evmdb_state_init(evmdb_state_t *state, const char *host, int port,
     /* Use same connection for reads (in production, point to replica) */
     state->ctx_read = state->ctx;
 
+    pthread_mutex_init(&state->lock, NULL);
+
     return 0;
 }
 
@@ -61,6 +63,7 @@ void evmdb_state_close(evmdb_state_t *state) {
     }
     /* Don't free ctx_read if it's the same pointer */
     state->ctx_read = NULL;
+    pthread_mutex_destroy(&state->lock);
 }
 
 /* ---- Account ------------------------------------------------------------ */
@@ -70,12 +73,13 @@ int evmdb_state_get_account(evmdb_state_t *state, const evmdb_address_t *addr,
     char addr_hex[ADDR_HEX_LEN];
     addr_to_hex(addr, addr_hex);
 
+    pthread_mutex_lock(&state->lock);
     redisReply *r = redisCommand(state->ctx_read,
         "HMGET account:%s nonce balance codehash", addr_hex);
+    pthread_mutex_unlock(&state->lock);
 
     if (!r || r->type != REDIS_REPLY_ARRAY || r->elements != 3) {
         if (r) freeReplyObject(r);
-        /* Return zero account */
         memset(out, 0, sizeof(*out));
         memcpy(&out->address, addr, sizeof(*addr));
         return 0;
@@ -83,21 +87,18 @@ int evmdb_state_get_account(evmdb_state_t *state, const evmdb_address_t *addr,
 
     memcpy(&out->address, addr, sizeof(*addr));
 
-    /* nonce */
     if (r->element[0]->type == REDIS_REPLY_STRING) {
         out->nonce = (uint64_t)strtoull(r->element[0]->str, NULL, 10);
     } else {
         out->nonce = 0;
     }
 
-    /* balance */
     if (r->element[1]->type == REDIS_REPLY_STRING) {
         evmdb_hex_decode(r->element[1]->str, out->balance.bytes, 32);
     } else {
         memset(&out->balance, 0, sizeof(out->balance));
     }
 
-    /* codehash */
     if (r->element[2]->type == REDIS_REPLY_STRING) {
         evmdb_hex_decode(r->element[2]->str, out->code_hash.bytes, 32);
     } else {
@@ -114,11 +115,13 @@ int evmdb_state_set_account(evmdb_state_t *state, const evmdb_account_t *acct) {
 
     char bal_hex[67], code_hex[67];
     bytes32_to_hex(&acct->balance, bal_hex);
-    bytes32_to_hex(&acct->code_hash, code_hex);
+    bytes32_to_hex((const evmdb_bytes32_t *)&acct->code_hash, code_hex);
 
+    pthread_mutex_lock(&state->lock);
     redisReply *r = redisCommand(state->ctx,
         "HSET account:%s nonce %llu balance %s codehash %s",
         addr_hex, (unsigned long long)acct->nonce, bal_hex, code_hex);
+    pthread_mutex_unlock(&state->lock);
 
     if (r) freeReplyObject(r);
     return 0;
@@ -129,8 +132,10 @@ int evmdb_state_get_balance(evmdb_state_t *state, const evmdb_address_t *addr,
     char addr_hex[ADDR_HEX_LEN];
     addr_to_hex(addr, addr_hex);
 
+    pthread_mutex_lock(&state->lock);
     redisReply *r = redisCommand(state->ctx_read,
         "HGET account:%s balance", addr_hex);
+    pthread_mutex_unlock(&state->lock);
 
     if (r && r->type == REDIS_REPLY_STRING) {
         evmdb_hex_decode(r->str, out->bytes, 32);
@@ -150,8 +155,10 @@ int evmdb_state_set_balance(evmdb_state_t *state, const evmdb_address_t *addr,
     char bal_hex[67];
     bytes32_to_hex(balance, bal_hex);
 
+    pthread_mutex_lock(&state->lock);
     redisReply *r = redisCommand(state->ctx,
         "HSET account:%s balance %s", addr_hex, bal_hex);
+    pthread_mutex_unlock(&state->lock);
 
     if (r) freeReplyObject(r);
     return 0;
@@ -162,8 +169,10 @@ int evmdb_state_get_nonce(evmdb_state_t *state, const evmdb_address_t *addr,
     char addr_hex[ADDR_HEX_LEN];
     addr_to_hex(addr, addr_hex);
 
+    pthread_mutex_lock(&state->lock);
     redisReply *r = redisCommand(state->ctx_read,
         "HGET account:%s nonce", addr_hex);
+    pthread_mutex_unlock(&state->lock);
 
     if (r && r->type == REDIS_REPLY_STRING) {
         *out = (uint64_t)strtoull(r->str, NULL, 10);
@@ -180,8 +189,10 @@ int evmdb_state_set_nonce(evmdb_state_t *state, const evmdb_address_t *addr,
     char addr_hex[ADDR_HEX_LEN];
     addr_to_hex(addr, addr_hex);
 
+    pthread_mutex_lock(&state->lock);
     redisReply *r = redisCommand(state->ctx,
         "HSET account:%s nonce %llu", addr_hex, (unsigned long long)nonce);
+    pthread_mutex_unlock(&state->lock);
 
     if (r) freeReplyObject(r);
     return 0;
@@ -198,8 +209,10 @@ int evmdb_state_get_storage(evmdb_state_t *state, const evmdb_address_t *addr,
     char key_hex[67];
     bytes32_to_hex(key, key_hex);
 
+    pthread_mutex_lock(&state->lock);
     redisReply *r = redisCommand(state->ctx_read,
         "HGET storage:%s %s", addr_hex, key_hex);
+    pthread_mutex_unlock(&state->lock);
 
     if (r && r->type == REDIS_REPLY_STRING) {
         evmdb_hex_decode(r->str, out->bytes, 32);
@@ -221,8 +234,10 @@ int evmdb_state_set_storage(evmdb_state_t *state, const evmdb_address_t *addr,
     bytes32_to_hex(key, key_hex);
     bytes32_to_hex(value, val_hex);
 
+    pthread_mutex_lock(&state->lock);
     redisReply *r = redisCommand(state->ctx,
         "HSET storage:%s %s %s", addr_hex, key_hex, val_hex);
+    pthread_mutex_unlock(&state->lock);
 
     if (r) freeReplyObject(r);
     return 0;
@@ -235,8 +250,10 @@ int evmdb_state_get_code(evmdb_state_t *state, const evmdb_address_t *addr,
     char addr_hex[ADDR_HEX_LEN];
     addr_to_hex(addr, addr_hex);
 
+    pthread_mutex_lock(&state->lock);
     redisReply *r = redisCommand(state->ctx_read,
         "GET code:%s", addr_hex);
+    pthread_mutex_unlock(&state->lock);
 
     if (r && r->type == REDIS_REPLY_STRING) {
         out->len = (size_t)r->len;
@@ -258,8 +275,10 @@ int evmdb_state_set_code(evmdb_state_t *state, const evmdb_address_t *addr,
     char addr_hex[ADDR_HEX_LEN];
     addr_to_hex(addr, addr_hex);
 
+    pthread_mutex_lock(&state->lock);
     redisReply *r = redisCommand(state->ctx,
         "SET code:%s %b", addr_hex, code, code_len);
+    pthread_mutex_unlock(&state->lock);
 
     if (r) freeReplyObject(r);
     return 0;
@@ -268,7 +287,10 @@ int evmdb_state_set_code(evmdb_state_t *state, const evmdb_address_t *addr,
 /* ---- Block number ------------------------------------------------------- */
 
 int evmdb_state_get_block_number(evmdb_state_t *state, uint64_t *out) {
+    pthread_mutex_lock(&state->lock);
     redisReply *r = redisCommand(state->ctx_read, "GET block:latest");
+    pthread_mutex_unlock(&state->lock);
+
     if (r && r->type == REDIS_REPLY_STRING) {
         *out = (uint64_t)strtoull(r->str, NULL, 10);
     } else {
@@ -279,55 +301,12 @@ int evmdb_state_get_block_number(evmdb_state_t *state, uint64_t *out) {
 }
 
 int evmdb_state_set_block_number(evmdb_state_t *state, uint64_t number) {
+    pthread_mutex_lock(&state->lock);
     redisReply *r = redisCommand(state->ctx,
         "SET block:latest %llu", (unsigned long long)number);
-    if (r) freeReplyObject(r);
-    return 0;
-}
-
-/* ---- Transaction queue -------------------------------------------------- */
-
-int evmdb_state_push_tx(evmdb_state_t *state, const uint8_t *raw_tx,
-                        size_t raw_len) {
-    redisReply *r = redisCommand(state->ctx,
-        "RPUSH tx:queue %b", raw_tx, raw_len);
-    if (r) freeReplyObject(r);
-    return 0;
-}
-
-int evmdb_state_pop_tx(evmdb_state_t *state, evmdb_bytes_t *out,
-                       int timeout_sec) {
-    redisReply *r = redisCommand(state->ctx,
-        "BLPOP tx:queue %d", timeout_sec);
-
-    if (!r || r->type != REDIS_REPLY_ARRAY || r->elements < 2) {
-        if (r) freeReplyObject(r);
-        return -1; /* timeout or error */
-    }
-
-    /* element[0] = key name, element[1] = value */
-    redisReply *val = r->element[1];
-    out->len = (size_t)val->len;
-    out->data = malloc(out->len);
-    if (out->data) {
-        memcpy(out->data, val->str, out->len);
-    }
-
-    freeReplyObject(r);
-    return 0;
-}
-
-/* ---- Pub/Sub ------------------------------------------------------------ */
-
-int evmdb_state_publish_block(evmdb_state_t *state, uint64_t block_number,
-                              const evmdb_hash_t *block_hash) {
-    char hash_hex[67];
-    evmdb_hex_encode(block_hash->bytes, 32, hash_hex, sizeof(hash_hex));
-
-    redisReply *r = redisCommand(state->ctx,
-        "PUBLISH chain:blocks %llu:%s",
-        (unsigned long long)block_number, hash_hex);
+    pthread_mutex_unlock(&state->lock);
 
     if (r) freeReplyObject(r);
     return 0;
 }
+

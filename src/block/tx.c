@@ -316,7 +316,3 @@ void evmdb_receipt_free(evmdb_receipt_t *receipt) {
     receipt->return_data.data = NULL;
 }
 
-void evmdb_block_free(evmdb_block_t *block) {
-    free(block->tx_hashes);
-    block->tx_hashes = NULL;
-}

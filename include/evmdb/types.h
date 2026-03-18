@@ -91,23 +91,16 @@ typedef struct {
     evmdb_bytes_t   return_data;
 } evmdb_receipt_t;
 
-/* ---- Block -------------------------------------------------------------- */
+/* ---- Block context (synthetic — no real block production) --------------- */
 
 typedef struct {
     uint64_t        number;
-    evmdb_hash_t    hash;
-    evmdb_hash_t    parent_hash;
-    evmdb_hash_t    state_root;
-    evmdb_hash_t    tx_root;
-    evmdb_hash_t    receipts_root;
-    evmdb_address_t coinbase;
     uint64_t        timestamp;
+    evmdb_address_t coinbase;
     uint64_t        gas_limit;
-    uint64_t        gas_used;
-    evmdb_bytes32_t base_fee;           /* EIP-1559 */
-    evmdb_hash_t   *tx_hashes;
-    size_t          tx_count;
-} evmdb_block_t;
+    uint64_t        base_fee;
+    uint64_t        chain_id;
+} evmdb_block_context_t;
 
 /* ---- Execution result --------------------------------------------------- */
 

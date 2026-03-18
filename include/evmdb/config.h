@@ -16,12 +16,8 @@ typedef struct {
 
     /* Chain */
     uint64_t    chain_id;
-    uint64_t    block_gas_limit;
-    uint64_t    block_time_ms;       /* 0 = produce block per tx */
-    uint64_t    base_fee_initial;    /* initial base fee in wei */
-
-    /* Sequencer */
-    const char *sequencer_key_path;  /* path to secp256k1 private key */
+    uint64_t    gas_limit;           /* max gas per execution context */
+    uint64_t    base_fee;            /* fixed base fee in wei */
 
     /* Logging */
     int         log_level;           /* 0=error 1=warn 2=info 3=debug */

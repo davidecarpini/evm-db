@@ -19,7 +19,8 @@ void evmdb_evm_destroy(evmdb_evm_t *evm);
    Reads and writes state via the provided state handle.
    Fills result struct. Returns 0 on success (even if tx reverts). */
 int evmdb_evm_execute_tx(evmdb_evm_t *evm, evmdb_state_t *state,
-                         const evmdb_tx_t *tx, const evmdb_block_t *block,
+                         const evmdb_tx_t *tx,
+                         const evmdb_block_context_t *block_ctx,
                          evmdb_exec_result_t *result);
 
 /* Execute a read-only call (eth_call). Does not modify state. */

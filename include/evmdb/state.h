@@ -3,12 +3,14 @@
 
 #include "evmdb/types.h"
 #include <hiredis/hiredis.h>
+#include <pthread.h>
 
 /* ---- Redis state interface ---------------------------------------------- */
 
 typedef struct {
     redisContext *ctx;           /* write connection */
     redisContext *ctx_read;      /* read connection (can be replica) */
+    pthread_mutex_t lock;        /* thread safety for concurrent RPC */
 } evmdb_state_t;
 
 /* Connect to Redis. Returns 0 on success. */
@@ -53,23 +55,9 @@ int evmdb_state_get_code(evmdb_state_t *state, const evmdb_address_t *addr,
 int evmdb_state_set_code(evmdb_state_t *state, const evmdb_address_t *addr,
                          const uint8_t *code, size_t code_len);
 
-/* ---- Block state -------------------------------------------------------- */
+/* ---- Block number ------------------------------------------------------- */
 
 int evmdb_state_get_block_number(evmdb_state_t *state, uint64_t *out);
 int evmdb_state_set_block_number(evmdb_state_t *state, uint64_t number);
-
-/* ---- Transaction queue -------------------------------------------------- */
-
-int evmdb_state_push_tx(evmdb_state_t *state, const uint8_t *raw_tx,
-                        size_t raw_len);
-
-/* Blocking pop. Caller must free out->data. Returns 0 on success. */
-int evmdb_state_pop_tx(evmdb_state_t *state, evmdb_bytes_t *out,
-                       int timeout_sec);
-
-/* ---- Pub/Sub ------------------------------------------------------------ */
-
-int evmdb_state_publish_block(evmdb_state_t *state, uint64_t block_number,
-                              const evmdb_hash_t *block_hash);
 
 #endif /* EVMDB_STATE_H */

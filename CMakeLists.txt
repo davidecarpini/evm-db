@@ -71,7 +71,6 @@ add_library(evmdb_core STATIC
     src/state/accounts.c
     src/evm/executor.c
     src/evm/gas.c
-    src/block/producer.c
     src/block/tx.c
     src/rpc/server.c
     src/rpc/handlers.c

@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /*
@@ -111,18 +112,6 @@ static void test_block_number(void) {
     assert(num == 12345);
 }
 
-static void test_tx_queue(void) {
-    uint8_t tx_data[] = {0x02, 0xF8, 0x73}; /* fake tx bytes */
-    evmdb_state_push_tx(&state, tx_data, sizeof(tx_data));
-
-    evmdb_bytes_t out;
-    int rc = evmdb_state_pop_tx(&state, &out, 1);
-    assert(rc == 0);
-    assert(out.len == sizeof(tx_data));
-    assert(memcmp(out.data, tx_data, sizeof(tx_data)) == 0);
-    free(out.data);
-}
-
 int main(void) {
     setup();
 
@@ -131,7 +120,6 @@ int main(void) {
     test_storage();
     test_code();
     test_block_number();
-    test_tx_queue();
 
     teardown();
 

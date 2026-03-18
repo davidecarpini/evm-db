@@ -16,14 +16,11 @@ void evmdb_config_defaults(evmdb_config_t *cfg) {
     cfg->rpc_host        = "0.0.0.0";
     cfg->rpc_port        = 8545;
 
-    cfg->chain_id        = 100100;    /* unique chain id */
-    cfg->block_gas_limit = 30000000;  /* 30M, same as Ethereum */
-    cfg->block_time_ms   = 10;        /* 10ms blocks */
-    cfg->base_fee_initial = 1000000;  /* 0.001 gwei — very cheap */
+    cfg->chain_id        = 100100;
+    cfg->gas_limit       = 30000000;   /* 30M */
+    cfg->base_fee        = 1000000000; /* 1 gwei */
 
-    cfg->sequencer_key_path = NULL;
-
-    cfg->log_level       = 2;         /* info */
+    cfg->log_level       = 2;          /* info */
 }
 
 int evmdb_config_load(evmdb_config_t *cfg, const char *path) {
@@ -34,7 +31,6 @@ int evmdb_config_load(evmdb_config_t *cfg, const char *path) {
 
     char line[512];
     while (fgets(line, sizeof(line), f)) {
-        /* Skip comments and empty lines */
         if (line[0] == '#' || line[0] == '\n' || line[0] == '[') {
             continue;
         }
@@ -44,7 +40,6 @@ int evmdb_config_load(evmdb_config_t *cfg, const char *path) {
             continue;
         }
 
-        /* Strip quotes from value */
         size_t vlen = strlen(value);
         if (vlen >= 2 && value[0] == '"' && value[vlen - 1] == '"') {
             value[vlen - 1] = '\0';
@@ -65,14 +60,10 @@ int evmdb_config_load(evmdb_config_t *cfg, const char *path) {
             cfg->rpc_port = atoi(value);
         } else if (strcmp(key, "chain_id") == 0) {
             cfg->chain_id = (uint64_t)atoll(value);
-        } else if (strcmp(key, "block_gas_limit") == 0) {
-            cfg->block_gas_limit = (uint64_t)atoll(value);
-        } else if (strcmp(key, "block_time_ms") == 0) {
-            cfg->block_time_ms = (uint64_t)atoll(value);
-        } else if (strcmp(key, "base_fee_initial") == 0) {
-            cfg->base_fee_initial = (uint64_t)atoll(value);
-        } else if (strcmp(key, "sequencer_key") == 0) {
-            cfg->sequencer_key_path = strdup(value);
+        } else if (strcmp(key, "gas_limit") == 0) {
+            cfg->gas_limit = (uint64_t)atoll(value);
+        } else if (strcmp(key, "base_fee") == 0) {
+            cfg->base_fee = (uint64_t)atoll(value);
         } else if (strcmp(key, "log_level") == 0) {
             cfg->log_level = atoi(value);
         }

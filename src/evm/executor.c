@@ -75,15 +75,15 @@ void evmdb_evm_destroy(evmdb_evm_t *evm) {
  * 7. Collect logs
  */
 int evmdb_evm_execute_tx(evmdb_evm_t *evm, evmdb_state_t *state,
-                         const evmdb_tx_t *tx, const evmdb_block_t *block,
+                         const evmdb_tx_t *tx,
+                         const evmdb_block_context_t *block_ctx,
                          evmdb_exec_result_t *result) {
     if (!evm || !evm->initialized) {
         snprintf(result->error, sizeof(result->error), "EVM not initialized");
         return -1;
     }
 
-    (void)state;
-    (void)block;
+    (void)block_ctx;
 
     /*
      * STUB: Accept all transactions as successful.

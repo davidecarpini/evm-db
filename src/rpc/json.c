@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -63,12 +64,14 @@ static int json_extract_id(const char *json, char *out, size_t out_len) {
     while (*pos && (*pos == ' ' || *pos == ':' || *pos == '\t')) pos++;
 
     if (*pos == '"') {
-        /* String id */
-        pos++;
+        /* String id — preserve quotes for JSON output */
         size_t i = 0;
-        while (*pos && *pos != '"' && i < out_len - 1) {
+        out[i++] = '"';
+        pos++; /* skip opening quote */
+        while (*pos && *pos != '"' && i < out_len - 2) {
             out[i++] = *pos++;
         }
+        out[i++] = '"';
         out[i] = '\0';
     } else {
         /* Numeric id */
