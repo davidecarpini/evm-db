@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
-project(evmdb C)
+project(evmdb C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Build type
@@ -17,12 +19,13 @@ set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG -march=native")
 # Dependencies
 # ---------------------------------------------------------------------------
 
+include(FetchContent)
+
 # hiredis (Redis C client)
 find_library(HIREDIS_LIB hiredis)
 find_path(HIREDIS_INCLUDE hiredis/hiredis.h)
 if(NOT HIREDIS_LIB)
     message(STATUS "hiredis not found, will fetch")
-    include(FetchContent)
     FetchContent_Declare(
         hiredis
         GIT_REPOSITORY https://github.com/redis/hiredis.git
@@ -33,15 +36,26 @@ if(NOT HIREDIS_LIB)
     set(HIREDIS_INCLUDE ${hiredis_SOURCE_DIR})
 endif()
 
-# evmone — we use the EVMC C interface only
-# evmone is fetched and built as a dependency
-include(FetchContent)
+# evmone with bundled EVMC
+set(EVMONE_TESTING OFF CACHE BOOL "" FORCE)
+set(EVMC_TOOLS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
-    evmc
-    GIT_REPOSITORY https://github.com/ethereum/evmc.git
-    GIT_TAG        v12.0.0
+    intx_vendor_modern
+    GIT_REPOSITORY https://github.com/chfast/intx.git
+    GIT_TAG        master
 )
-FetchContent_MakeAvailable(evmc)
+FetchContent_GetProperties(intx_vendor_modern)
+if(NOT intx_vendor_modern_POPULATED)
+    FetchContent_Populate(intx_vendor_modern)
+endif()
+set(EVMONE_INTX_DIR "${intx_vendor_modern_SOURCE_DIR}" CACHE PATH "" FORCE)
+FetchContent_Declare(
+    evmone_vendor
+    GIT_REPOSITORY https://github.com/ethereum/evmone.git
+    GIT_TAG        v0.19.0
+    GIT_SUBMODULES_RECURSE TRUE
+)
+FetchContent_MakeAvailable(evmone_vendor)
 
 # secp256k1 for ECDSA signature verification
 find_library(SECP256K1_LIB secp256k1)
@@ -65,6 +79,7 @@ endif()
 
 add_library(evmdb_core STATIC
     src/core/config.c
+    src/core/keccak.c
     src/core/log.c
     src/core/hex.c
     src/state/redis_state.c
@@ -87,7 +102,7 @@ target_include_directories(evmdb_core PUBLIC
 target_link_libraries(evmdb_core PUBLIC
     ${HIREDIS_LIB}
     ${SECP256K1_LIB}
-    evmc
+    evmone
     pthread
 )
 
@@ -115,6 +130,14 @@ add_test(NAME test_state COMMAND test_state)
 add_executable(test_tx tests/test_tx.c)
 target_link_libraries(test_tx PRIVATE evmdb_core)
 add_test(NAME test_tx COMMAND test_tx)
+
+add_executable(test_crypto tests/test_crypto.c)
+target_link_libraries(test_crypto PRIVATE evmdb_core)
+add_test(NAME test_crypto COMMAND test_crypto)
+
+add_executable(test_evm tests/test_evm.c)
+target_link_libraries(test_evm PRIVATE evmdb_core)
+add_test(NAME test_evm COMMAND test_evm)
 
 add_executable(test_rpc tests/test_rpc.c)
 target_link_libraries(test_rpc PRIVATE evmdb_core)

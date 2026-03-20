@@ -8,10 +8,15 @@
 /* ---- Key formatting ----------------------------------------------------- */
 
 #define ADDR_HEX_LEN 43 /* "0x" + 40 hex + '\0' */
+#define HASH_HEX_LEN 67 /* "0x" + 64 hex + '\0' */
 #define KEY_BUF_LEN  128
 
 static void addr_to_hex(const evmdb_address_t *addr, char *out) {
     evmdb_hex_encode(addr->bytes, 20, out, ADDR_HEX_LEN);
+}
+
+static void hash_to_hex(const evmdb_hash_t *hash, char *out) {
+    evmdb_hex_encode(hash->bytes, 32, out, HASH_HEX_LEN);
 }
 
 static void bytes32_to_hex(const evmdb_bytes32_t *b, char *out) {
@@ -257,9 +262,10 @@ int evmdb_state_get_code(evmdb_state_t *state, const evmdb_address_t *addr,
 
     if (r && r->type == REDIS_REPLY_STRING) {
         out->len = (size_t)r->len;
-        out->data = malloc(out->len);
+        out->data = malloc(out->len + 1);
         if (out->data) {
             memcpy(out->data, r->str, out->len);
+            out->data[out->len] = '\0';
         }
     } else {
         out->data = NULL;
@@ -278,6 +284,44 @@ int evmdb_state_set_code(evmdb_state_t *state, const evmdb_address_t *addr,
     pthread_mutex_lock(&state->lock);
     redisReply *r = redisCommand(state->ctx,
         "SET code:%s %b", addr_hex, code, code_len);
+    pthread_mutex_unlock(&state->lock);
+
+    if (r) freeReplyObject(r);
+    return 0;
+}
+
+int evmdb_state_get_receipt(evmdb_state_t *state, const evmdb_hash_t *tx_hash,
+                            evmdb_bytes_t *out) {
+    char hash_hex[HASH_HEX_LEN];
+    hash_to_hex(tx_hash, hash_hex);
+
+    pthread_mutex_lock(&state->lock);
+    redisReply *r = redisCommand(state->ctx_read, "GET receipt:%s", hash_hex);
+    pthread_mutex_unlock(&state->lock);
+
+    if (r && r->type == REDIS_REPLY_STRING) {
+        out->len = (size_t)r->len;
+        out->data = malloc(out->len);
+        if (out->data) {
+            memcpy(out->data, r->str, out->len);
+        }
+    } else {
+        out->data = NULL;
+        out->len = 0;
+    }
+
+    if (r) freeReplyObject(r);
+    return 0;
+}
+
+int evmdb_state_set_receipt(evmdb_state_t *state, const evmdb_hash_t *tx_hash,
+                            const uint8_t *data, size_t data_len) {
+    char hash_hex[HASH_HEX_LEN];
+    hash_to_hex(tx_hash, hash_hex);
+
+    pthread_mutex_lock(&state->lock);
+    redisReply *r = redisCommand(state->ctx, "SET receipt:%s %b", hash_hex,
+                                 data, data_len);
     pthread_mutex_unlock(&state->lock);
 
     if (r) freeReplyObject(r);

@@ -1,6 +1,9 @@
 #include "evmdb/block.h"
+#include "evmdb/crypto.h"
 #include "evmdb/log.h"
 
+#include <secp256k1.h>
+#include <secp256k1_recovery.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -117,6 +120,207 @@ static void rlp_to_address(const uint8_t *data, size_t len,
     memcpy(out->bytes + (20 - len), data, len);
 }
 
+typedef struct {
+    uint8_t *data;
+    size_t len;
+    size_t cap;
+} rlp_buffer_t;
+
+static void rlp_buffer_free(rlp_buffer_t *buf) {
+    free(buf->data);
+    buf->data = NULL;
+    buf->len = 0;
+    buf->cap = 0;
+}
+
+static int rlp_buffer_reserve(rlp_buffer_t *buf, size_t additional) {
+    size_t needed = buf->len + additional;
+    size_t new_cap = buf->cap ? buf->cap : 64;
+    uint8_t *new_data;
+
+    if (needed <= buf->cap) {
+        return 0;
+    }
+
+    while (new_cap < needed) {
+        new_cap *= 2;
+    }
+
+    new_data = realloc(buf->data, new_cap);
+    if (!new_data) {
+        return -1;
+    }
+
+    buf->data = new_data;
+    buf->cap = new_cap;
+    return 0;
+}
+
+static int rlp_buffer_append(rlp_buffer_t *buf, const uint8_t *data,
+                             size_t len) {
+    if (rlp_buffer_reserve(buf, len) != 0) {
+        return -1;
+    }
+
+    if (len > 0) {
+        memcpy(buf->data + buf->len, data, len);
+    }
+    buf->len += len;
+    return 0;
+}
+
+static int rlp_buffer_append_byte(rlp_buffer_t *buf, uint8_t value) {
+    return rlp_buffer_append(buf, &value, 1);
+}
+
+static int rlp_append_length(rlp_buffer_t *buf, size_t len, uint8_t short_base,
+                             uint8_t long_base) {
+    uint8_t len_bytes[8];
+    size_t len_len = 0;
+
+    if (len <= 55) {
+        return rlp_buffer_append_byte(buf, (uint8_t)(short_base + len));
+    }
+
+    while (len > 0) {
+        len_bytes[7 - len_len] = (uint8_t)(len & 0xff);
+        len >>= 8;
+        len_len++;
+    }
+
+    if (rlp_buffer_append_byte(buf, (uint8_t)(long_base + len_len)) != 0) {
+        return -1;
+    }
+
+    return rlp_buffer_append(buf, len_bytes + (8 - len_len), len_len);
+}
+
+static int rlp_append_bytes(rlp_buffer_t *buf, const uint8_t *data, size_t len) {
+    if (len == 1 && data && data[0] <= 0x7f) {
+        return rlp_buffer_append_byte(buf, data[0]);
+    }
+
+    if (rlp_append_length(buf, len, 0x80, 0xb7) != 0) {
+        return -1;
+    }
+
+    return rlp_buffer_append(buf, data, len);
+}
+
+static int rlp_append_uint64(rlp_buffer_t *buf, uint64_t value) {
+    uint8_t bytes[8];
+    size_t len = 0;
+
+    if (value == 0) {
+        return rlp_append_bytes(buf, NULL, 0);
+    }
+
+    while (value > 0) {
+        bytes[7 - len] = (uint8_t)(value & 0xff);
+        value >>= 8;
+        len++;
+    }
+
+    return rlp_append_bytes(buf, bytes + (8 - len), len);
+}
+
+static int rlp_append_bytes32(rlp_buffer_t *buf, const evmdb_bytes32_t *value) {
+    size_t offset = 0;
+
+    while (offset < 32 && value->bytes[offset] == 0) {
+        offset++;
+    }
+
+    if (offset == 32) {
+        return rlp_append_bytes(buf, NULL, 0);
+    }
+
+    return rlp_append_bytes(buf, value->bytes + offset, 32 - offset);
+}
+
+static int rlp_append_address(rlp_buffer_t *buf, const evmdb_address_t *addr,
+                              bool is_null) {
+    if (is_null) {
+        return rlp_append_bytes(buf, NULL, 0);
+    }
+
+    return rlp_append_bytes(buf, addr->bytes, sizeof(addr->bytes));
+}
+
+static int rlp_append_empty_list(rlp_buffer_t *buf) {
+    return rlp_buffer_append_byte(buf, 0xc0);
+}
+
+static int rlp_wrap_list(rlp_buffer_t *out, const rlp_buffer_t *payload) {
+    if (rlp_append_length(out, payload->len, 0xc0, 0xf7) != 0) {
+        return -1;
+    }
+
+    return rlp_buffer_append(out, payload->data, payload->len);
+}
+
+int evmdb_tx_signing_hash(const evmdb_tx_t *tx, evmdb_hash_t *out) {
+    rlp_buffer_t payload = {0};
+    rlp_buffer_t encoded = {0};
+    int rc = -1;
+
+    if (!tx || !out) {
+        return -1;
+    }
+
+    if (tx->type == EVMDB_TX_EIP1559) {
+        if (rlp_append_uint64(&payload, tx->chain_id) != 0 ||
+            rlp_append_uint64(&payload, tx->nonce) != 0 ||
+            rlp_append_bytes32(&payload, &tx->max_priority_fee) != 0 ||
+            rlp_append_bytes32(&payload, &tx->max_fee_per_gas) != 0 ||
+            rlp_append_uint64(&payload, tx->gas_limit) != 0 ||
+            rlp_append_address(&payload, &tx->to, tx->to_is_null) != 0 ||
+            rlp_append_bytes32(&payload, &tx->value) != 0 ||
+            rlp_append_bytes(&payload, tx->data.data, tx->data.len) != 0 ||
+            rlp_append_empty_list(&payload) != 0) {
+            goto out;
+        }
+
+        if (rlp_buffer_append_byte(&encoded, 0x02) != 0 ||
+            rlp_wrap_list(&encoded, &payload) != 0) {
+            goto out;
+        }
+    } else if (tx->type == EVMDB_TX_LEGACY) {
+        if (rlp_append_uint64(&payload, tx->nonce) != 0 ||
+            rlp_append_bytes32(&payload, &tx->gas_price) != 0 ||
+            rlp_append_uint64(&payload, tx->gas_limit) != 0 ||
+            rlp_append_address(&payload, &tx->to, tx->to_is_null) != 0 ||
+            rlp_append_bytes32(&payload, &tx->value) != 0 ||
+            rlp_append_bytes(&payload, tx->data.data, tx->data.len) != 0) {
+            goto out;
+        }
+
+        if (tx->chain_id != 0) {
+            evmdb_bytes32_t zero = {{0}};
+
+            if (rlp_append_uint64(&payload, tx->chain_id) != 0 ||
+                rlp_append_bytes32(&payload, &zero) != 0 ||
+                rlp_append_bytes32(&payload, &zero) != 0) {
+                goto out;
+            }
+        }
+
+        if (rlp_wrap_list(&encoded, &payload) != 0) {
+            goto out;
+        }
+    } else {
+        goto out;
+    }
+
+    evmdb_keccak256(encoded.data, encoded.len, out);
+    rc = 0;
+
+out:
+    rlp_buffer_free(&payload);
+    rlp_buffer_free(&encoded);
+    return rc;
+}
+
 /* ---- Public API --------------------------------------------------------- */
 
 int evmdb_tx_decode(const uint8_t *raw, size_t raw_len, evmdb_tx_t *tx) {
@@ -210,7 +414,7 @@ int evmdb_tx_decode(const uint8_t *raw, size_t raw_len, evmdb_tx_t *tx) {
 
         /* signatureYParity (v) */
         if (rlp_decode_item(&lr, &item, &item_len) != 0) return -1;
-        tx->v = (uint8_t)rlp_to_uint64(item, item_len);
+        tx->v = rlp_to_uint64(item, item_len);
 
         /* r */
         if (rlp_decode_item(&lr, &item, &item_len) != 0) return -1;
@@ -252,7 +456,7 @@ int evmdb_tx_decode(const uint8_t *raw, size_t raw_len, evmdb_tx_t *tx) {
         }
 
         if (rlp_decode_item(&lr, &item, &item_len) != 0) return -1;
-        tx->v = (uint8_t)rlp_to_uint64(item, item_len);
+        tx->v = rlp_to_uint64(item, item_len);
 
         if (rlp_decode_item(&lr, &item, &item_len) != 0) return -1;
         rlp_to_bytes32(item, item_len, &tx->r);
@@ -267,29 +471,62 @@ int evmdb_tx_decode(const uint8_t *raw, size_t raw_len, evmdb_tx_t *tx) {
     }
     /* TODO: EIP-2930 */
 
-    /*
-     * TODO: Compute tx hash = keccak256(raw)
-     * Requires a keccak256 implementation.
-     */
+    evmdb_keccak256(raw, raw_len, &tx->hash);
 
     return 0;
 }
 
 int evmdb_tx_recover_sender(evmdb_tx_t *tx) {
-    /*
-     * TODO: Recover sender address from (v, r, s) signature.
-     *
-     * Steps:
-     * 1. Compute signing hash (RLP of tx fields without v, r, s)
-     * 2. Use secp256k1_ecdsa_recover to get public key
-     * 3. Keccak256 of public key, take last 20 bytes = address
-     *
-     * Requires: libsecp256k1 with recovery module + keccak256.
-     */
+    evmdb_hash_t signing_hash;
+    evmdb_hash_t pubkey_hash;
+    secp256k1_context *ctx = NULL;
+    secp256k1_ecdsa_recoverable_signature sig;
+    secp256k1_pubkey pubkey;
+    uint8_t compact_sig[64];
+    uint8_t pubkey_bytes[65];
+    size_t pubkey_len = sizeof(pubkey_bytes);
+    int recid = -1;
 
-    /* STUB: set from to zero address */
-    memset(&tx->from, 0, sizeof(tx->from));
+    if (!tx || evmdb_tx_signing_hash(tx, &signing_hash) != 0) {
+        return -1;
+    }
 
+    if (tx->type == EVMDB_TX_EIP1559 || tx->type == EVMDB_TX_EIP2930) {
+        if (tx->v > 1) {
+            return -1;
+        }
+        recid = (int)tx->v;
+    } else if (tx->v == 27 || tx->v == 28) {
+        recid = (int)(tx->v - 27);
+    } else if (tx->v >= 35) {
+        recid = (int)((tx->v - 35) % 2);
+    } else {
+        return -1;
+    }
+
+    memcpy(compact_sig, tx->r.bytes, 32);
+    memcpy(compact_sig + 32, tx->s.bytes, 32);
+
+    ctx = secp256k1_context_create(SECP256K1_CONTEXT_VERIFY);
+    if (!ctx) {
+        return -1;
+    }
+
+    if (!secp256k1_ecdsa_recoverable_signature_parse_compact(ctx, &sig,
+                                                             compact_sig,
+                                                             recid) ||
+        !secp256k1_ecdsa_recover(ctx, &pubkey, &sig, signing_hash.bytes) ||
+        !secp256k1_ec_pubkey_serialize(ctx, pubkey_bytes, &pubkey_len, &pubkey,
+                                       SECP256K1_EC_UNCOMPRESSED)) {
+        secp256k1_context_destroy(ctx);
+        memset(&tx->from, 0, sizeof(tx->from));
+        return -1;
+    }
+
+    secp256k1_context_destroy(ctx);
+
+    evmdb_keccak256(pubkey_bytes + 1, 64, &pubkey_hash);
+    memcpy(tx->from.bytes, pubkey_hash.bytes + 12, sizeof(tx->from.bytes));
     return 0;
 }
 

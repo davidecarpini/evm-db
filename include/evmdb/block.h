@@ -8,6 +8,9 @@
 /* Decode RLP-encoded signed transaction. Returns 0 on success. */
 int evmdb_tx_decode(const uint8_t *raw, size_t raw_len, evmdb_tx_t *tx);
 
+/* Compute the transaction signing hash used for signatures. */
+int evmdb_tx_signing_hash(const evmdb_tx_t *tx, evmdb_hash_t *out);
+
 /* Recover sender address from signature. Returns 0 on success. */
 int evmdb_tx_recover_sender(evmdb_tx_t *tx);
 

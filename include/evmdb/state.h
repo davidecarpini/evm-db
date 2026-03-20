@@ -55,6 +55,12 @@ int evmdb_state_get_code(evmdb_state_t *state, const evmdb_address_t *addr,
 int evmdb_state_set_code(evmdb_state_t *state, const evmdb_address_t *addr,
                          const uint8_t *code, size_t code_len);
 
+int evmdb_state_get_receipt(evmdb_state_t *state, const evmdb_hash_t *tx_hash,
+                            evmdb_bytes_t *out);
+
+int evmdb_state_set_receipt(evmdb_state_t *state, const evmdb_hash_t *tx_hash,
+                            const uint8_t *data, size_t data_len);
+
 /* ---- Block number ------------------------------------------------------- */
 
 int evmdb_state_get_block_number(evmdb_state_t *state, uint64_t *out);

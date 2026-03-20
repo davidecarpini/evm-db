@@ -102,6 +102,19 @@ static void test_code(void) {
     free(code.data);
 }
 
+static void test_receipt(void) {
+    evmdb_hash_t tx_hash = {{0x12, 0x34, 0x56}};
+    const char *json = "{\"status\":\"0x1\"}";
+    evmdb_bytes_t receipt;
+
+    evmdb_state_set_receipt(&state, &tx_hash, (const uint8_t *)json,
+                            strlen(json));
+    evmdb_state_get_receipt(&state, &tx_hash, &receipt);
+    assert(receipt.len == strlen(json));
+    assert(memcmp(receipt.data, json, receipt.len) == 0);
+    free(receipt.data);
+}
+
 static void test_block_number(void) {
     uint64_t num;
     evmdb_state_get_block_number(&state, &num);
@@ -119,6 +132,7 @@ int main(void) {
     test_balance();
     test_storage();
     test_code();
+    test_receipt();
     test_block_number();
 
     teardown();

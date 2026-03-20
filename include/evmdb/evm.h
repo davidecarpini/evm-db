@@ -15,6 +15,10 @@ evmdb_evm_t *evmdb_evm_create(const char *evmone_path);
 
 void evmdb_evm_destroy(evmdb_evm_t *evm);
 
+int evmdb_evm_compute_create_address(const evmdb_address_t *sender,
+                                     uint64_t nonce,
+                                     evmdb_address_t *out);
+
 /* Execute a transaction against the current state.
    Reads and writes state via the provided state handle.
    Fills result struct. Returns 0 on success (even if tx reverts). */
@@ -26,7 +30,8 @@ int evmdb_evm_execute_tx(evmdb_evm_t *evm, evmdb_state_t *state,
 /* Execute a read-only call (eth_call). Does not modify state. */
 int evmdb_evm_call(evmdb_evm_t *evm, evmdb_state_t *state,
                    const evmdb_address_t *from, const evmdb_address_t *to,
-                   const evmdb_bytes_t *data, uint64_t gas,
+                   const evmdb_bytes_t *data,
+                   const evmdb_block_context_t *block_ctx, uint64_t gas,
                    evmdb_exec_result_t *result);
 
 #endif /* EVMDB_EVM_H */

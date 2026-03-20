@@ -55,7 +55,7 @@ typedef struct {
     evmdb_bytes_t   data;               /* calldata */
 
     /* signature */
-    uint8_t         v;
+    uint64_t        v;
     evmdb_bytes32_t r;
     evmdb_bytes32_t s;
 
